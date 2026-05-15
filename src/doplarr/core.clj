@@ -5,10 +5,12 @@
    [discljord.connections :as c]
    [discljord.events :as e]
    [discljord.messaging :as m]
+   [doplarr.backends.overseerr.impl :as overseerr]
    [doplarr.config :as config]
    [doplarr.discord :as discord]
    [doplarr.interaction-state-machine :as ism]
    [doplarr.state :as state]
+   [doplarr.webhook :as webhook]
    [taoensso.timbre :refer [debug fatal info] :as timbre]
    [taoensso.timbre.tools.logging :as tlog])
   (:gen-class))
@@ -36,15 +38,32 @@
 (defmethod handle-event! :ready
   [_ {{id :id} :user}]
   (info "Discord connection successful")
-  (swap! state/discord assoc :bot-id id))
+  (swap! state/discord assoc :bot-id id)
+  (let [media-types (config/available-media @state/config)
+        messaging (:messaging @state/discord)]
+    (discord/register-commands media-types id messaging)))
 
 (defmethod handle-event! :guild-create
-  [_ {:keys [id]}]
-  (info "Connected to guild")
-  (let [media-types (config/available-media @state/config)
-        messaging (:messaging @state/discord)
-        bot-id (:bot-id @state/discord)]
-    (discord/register-commands media-types bot-id messaging id)))
+  [_ _]
+  (info "Connected to guild"))
+
+(defmethod handle-event! :message-reaction-add
+  [_ data]
+  (let [{:keys [user-id emoji]} data
+        message-id (str (:message-id data))
+        {:keys [bot-id messaging]} @state/discord]
+    (when (and (not= user-id bot-id)
+               (= (:name emoji) "🗑️")
+               (contains? @state/reaction-watch message-id))
+      (let [{:keys [seerr-id discord-id dm-channel-id title]} (get @state/reaction-watch message-id)]
+        (when (= user-id discord-id)
+          (info "Deleting media" title "for user" user-id)
+          (swap! state/reaction-watch dissoc message-id)
+          (a/go
+            (a/<! (overseerr/delete-media-files! seerr-id))
+            (a/<! (overseerr/delete-media! seerr-id))
+            (a/<! (m/edit-message! messaging dm-channel-id message-id
+                                   (discord/content-response "Deleted from your library.")))))))))
 
 (defmethod handle-event! :default
   [event-type data]
@@ -53,7 +72,7 @@
 (defn start-bot! []
   (let [event-ch (a/chan 100)
         token (:discord/token @state/config)
-        connection-ch (c/connect-bot! token event-ch :intents #{:guilds})
+        connection-ch (c/connect-bot! token event-ch :intents #{:guilds :direct-message-reactions})
         messaging-ch (m/start-connection! token)
         init-state {:connection connection-ch
                     :event event-ch
@@ -63,7 +82,7 @@
          (catch Exception e (fatal e "Exception thrown from event handler"))
          (finally
            (m/stop-connection! messaging-ch)
-           (a/close!           event-ch)))))
+           (a/close! event-ch)))))
 
 (defn setup-config! []
   (reset! state/config (config/valid-config (load-env)))
@@ -72,6 +91,7 @@
 
 (defn startup! []
   (setup-config!)
+  (webhook/start-server!)
   (start-bot!))
 
 ; Program Entry Point

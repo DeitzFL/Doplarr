@@ -23,7 +23,6 @@
 
 (defn content-response [content]
   {:content content
-   :flags 64
    :embeds []
    :components []})
 
@@ -50,7 +49,9 @@
   {:id (:id interaction)
    :type (interaction-types (:type interaction))
    :token (:token interaction)
-   :user-id (s/select-one [:member :user :id] interaction)
+   :user-id (or (s/select-one [:member :user :id] interaction)
+               (s/select-one [:user :id] interaction))
+   :dm? (nil? (:guild-id interaction))
    :channel-id (:channel-id interaction)
    :payload
    {:component-type (component-types (get-in interaction [:data :component-type]))
@@ -80,7 +81,6 @@
 
 (defn dropdown [content id options]
   {:content content
-   :flags 64
    :components [{:type 1
                  :components [{:type 3
                                :custom_id id
@@ -88,8 +88,7 @@
 
 (defn search-response [results uuid]
   (if (empty? results)
-    {:content "Search result returned no hits"
-     :flags 64}
+    {:content "Search result returned no hits"}
     (dropdown "Choose one of the following results"
               (str "result-select:" uuid)
               (map-indexed select-menu-option results))))
@@ -135,7 +134,6 @@
 (defn request [embed-data uuid]
   {:content (str "Request this " (name (:media-type embed-data)) " ?")
    :embeds [(request-embed embed-data)]
-   :flags 64
    :components [{:type 1 :components (for [format (:request-formats embed-data)]
                                        (request-button format uuid))}]})
 
@@ -145,13 +143,14 @@
         (name media-type) " `" (:title payload) " (" (:year payload) ")"
         "` has been received!")})
 
-(defn request-performed-embed [embed-data user-id]
-  {:content (str "<@" user-id "> has requested:")
-   :embeds [(request-embed embed-data)]})
+(defn request-performed-embed [embed-data _user-id]
+  {:content "Your request has been received!"
+   :embeds [(request-embed embed-data)]
+   :components []})
 
 ;; Discljord Utilities
-(defn register-commands [media-types bot-id messaging guild-id]
-  (->> @(m/bulk-overwrite-guild-application-commands!
-         messaging bot-id guild-id
+(defn register-commands [media-types bot-id messaging]
+  (->> @(m/bulk-overwrite-global-application-commands!
+         messaging bot-id
          [(request-command media-types)])
        (else #(fatal % "Error in registering commands"))))

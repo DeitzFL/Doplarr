@@ -21,6 +21,9 @@
 (defn POST [endpoint & [params]]
   (utils/http-request :post (str @base-url endpoint) @api-key params))
 
+(defn DELETE [endpoint & [params]]
+  (utils/http-request :delete (str @base-url endpoint) @api-key params))
+
 (defn parse-year [result]
   (.getYear (java.time.LocalDate/parse
              (if (empty? (or (:first-air-date result)
@@ -114,3 +117,21 @@
       users
       (let [id (first ids)]
         (recur (rest ids) (assoc users (a/<! (discord-id id)) id))))))
+
+(defn seerr-media-id [tmdb-id media-type-str]
+  (a/go
+    (->> (a/<! (GET (str "/" media-type-str "/" tmdb-id)))
+         (then #(s/select-one [:body :media-info :id] (utils/from-camel %)))
+         (else #(fatal % "Error looking up Seerr media ID")))))
+
+(defn delete-media! [seerr-id]
+  (a/go
+    (->> (a/<! (DELETE (str "/media/" seerr-id)))
+         (then :status)
+         (else #(fatal % "Error deleting media from Seerr")))))
+
+(defn delete-media-files! [seerr-id]
+  (a/go
+    (->> (a/<! (DELETE (str "/media/" seerr-id "/file")))
+         (then :status)
+         (else #(fatal % "Error deleting media files from Seerr")))))

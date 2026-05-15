@@ -12,6 +12,7 @@
         cheshire/cheshire {:mvn/version "6.1.0"}
         fmnoise/flow {:mvn/version "4.3.0"}
         hato/hato {:mvn/version "1.0.0"}
+        http-kit/http-kit {:mvn/version "2.8.0"}
         com.taoensso/timbre {:mvn/version "6.8.0"}
         camel-snake-kebab/camel-snake-kebab {:mvn/version "0.4.3"}}
 
